@@ -10,3 +10,5 @@ cc "$repo/tests/mobile/test-bionic.c" -L "$prefix/lib" -lc_bio -o "$out/test-bio
 cc "$repo/tests/mobile/test-ffi.c" -L "$prefix/lib" -Wl,--no-as-needed -lc_bio -ldl_bio -lpthread_bio -o "$out/test-ffi"
 timeout 30 "$out/test-bionic"
 timeout 30 "$out/test-ffi"
+cc "$repo/tests/mobile/test-netdb.c" -L "$prefix/lib" -Wl,--no-as-needed -lc_bio -ldl_bio -lpthread_bio -o "$out/test-netdb"
+timeout 30 "$out/test-netdb"
