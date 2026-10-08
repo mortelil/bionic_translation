@@ -111,6 +111,7 @@ endif
 c_bio = shared_library('c_bio',
 	sources: [
 		'libc/libc.c',
+		'libc/libc-atfork.c',
 		'libc/libc-chk.c',
 		'libc/libc-math.c',
 		'libc/libc-misc.c',
