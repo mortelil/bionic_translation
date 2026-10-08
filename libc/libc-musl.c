@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
+#include <sys/sendfile.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/vfs.h>
@@ -116,10 +117,23 @@ int bionic_stat64(const char *filename, struct stat *buf)
 	return stat(filename, buf);
 }
 
+ssize_t bionic_sendfile64(int out_fd, int in_fd, off_t *offset, size_t count)
+{
+	return sendfile(out_fd, in_fd, offset, count);
+}
+
 int bionic_fstat64(int filedes, struct stat *buf)
 {
 	return fstat(filedes, buf);
 }
+
+#if defined(__x86_64__) || defined(__aarch64__)
+/* Android and musl use the same stat layout on these 64-bit architectures. */
+int bionic_fstatat64(int dirfd, const char *pathname, struct stat *buf, int flags)
+{
+	return fstatat(dirfd, pathname, buf, flags);
+}
+#endif
 
 int bionic_lstat64(const char *filename, struct stat *buf)
 {

@@ -17,6 +17,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
+#include <poll.h>
 
 /* musl needs these, glibc implements them (and probably did even before bionic) */
 #ifndef __GLIBC__
@@ -77,10 +78,46 @@ ssize_t bionic___read_chk(int fd, void *buf, size_t count, size_t buf_size)
 	return read(fd, buf, count);
 }
 
+ssize_t bionic___pread_chk(int fd, void *buf, size_t count, off_t offset, size_t buf_size)
+{
+	if (count > buf_size || count > SSIZE_MAX) {
+		fprintf(stderr, "__pread_chk: read exceeds buffer size or SSIZE_MAX\n");
+		abort();
+	}
+	return pread(fd, buf, count, offset);
+}
+
+int bionic___poll_chk(struct pollfd *fds, nfds_t count, int timeout, size_t fds_size)
+{
+	if (count > fds_size / sizeof(*fds)) {
+		fprintf(stderr, "__poll_chk: descriptor array exceeds buffer size\n");
+		abort();
+	}
+	return poll(fds, count, timeout);
+}
+
+ssize_t bionic___readlink_chk(const char *path, char *buf, size_t count, size_t buf_size)
+{
+	if (count > buf_size || count > SSIZE_MAX) {
+		fprintf(stderr, "__readlink_chk: read exceeds buffer size or SSIZE_MAX\n");
+		abort();
+	}
+	return readlink(path, buf, count);
+}
+
 int bionic___open_2(const char *pathname, int flags)
 {
 	flags |= O_LARGEFILE;
 	return open(pathname, flags, 0);
+}
+
+int bionic___openat_2(int dirfd, const char *pathname, int flags)
+{
+	if ((flags & O_CREAT) || (flags & O_TMPFILE) == O_TMPFILE) {
+		fprintf(stderr, "__openat_2: flags require a mode argument\n");
+		abort();
+	}
+	return openat(dirfd, pathname, flags | O_LARGEFILE);
 }
 
 void *bionic___memset_chk(void *dest, int c, size_t n, size_t dest_len)
