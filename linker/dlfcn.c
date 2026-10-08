@@ -166,6 +166,16 @@ void *bionic_dlsym(void *handle, const char *symbol)
 
 	if (handle == RTLD_DEFAULT) {
 		sym = apkenv_lookup(symbol, &found, NULL);
+		/* Android libraries and the host C runtime share the process scope.
+		 * Relocations already fall back to host symbols; dynamic FFI lookups
+		 * must do the same (after preferring bionic_ ABI adapters above). */
+		if (!sym) {
+			void *host_symbol = dlsym(RTLD_DEFAULT, symbol);
+			if (host_symbol) {
+				pthread_mutex_unlock(&apkenv_dl_lock);
+				return wrapper_create(symbol, host_symbol);
+			}
+		}
 	} else if (handle == RTLD_NEXT) {
 		void *ret_addr = __builtin_return_address(0);
 		soinfo *si = apkenv_find_containing_library(ret_addr);

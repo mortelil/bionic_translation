@@ -2926,7 +2926,7 @@ static int apkenv_link_image(soinfo *si, /*unused...?*/ unsigned wr_offset)
 	return 0;
 
 fail:
-	ERROR("failed to link %s\n", si->name);
+	ERROR("failed to link %s: %s\n", si->name, apkenv_linker_get_error());
 	si->flags |= FLAG_ERROR;
 	return -1;
 }
