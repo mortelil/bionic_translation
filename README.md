@@ -1,3 +1,25 @@
+# Experimental bionic_translation for Linux mobile
+
+Unofficial companion fork for the experimental ATL mobile branch. Upstream:
+https://gitlab.com/android_translation_layer/bionic_translation
+
+Changes add missing fortified/file adapters, atfork registration/cleanup and
+process-scope symbol lookup used by Dart. These were developed with Codex
+assistance. Existing source history and notices are retained. This is not a fork
+of Google's full Bionic libc and is not a claim of complete ABI compatibility.
+
+Build using the sibling ATL checkout's `scripts/mobile/build.sh`. Run the local
+native regression cases with `sh tests/mobile/run.sh` inside Alpine after that
+build. The default private installation is `../.atl-runtime`; `ATL_PREFIX` can
+select another prefix. Tests cover I/O, rejected bounds, callback order and
+symbol precedence; concurrent/reentrant atfork behavior remains a review need.
+
+New atfork and mobile-test files are Apache-2.0 (see their SPDX headers and
+`LICENSES/Apache-2.0.txt`). Existing files retain their individual licenses; this
+statement does not relicense the repository. Upstream's README follows.
+
+---
+
 ### a set of libraries for loading bionic-linked .so files on musl/glibc
 
 - the bionic linker under `bionic_translation/linker/` is taken from https://github.com/Cloudef/android2gnulinux and partly modified for our purposes
