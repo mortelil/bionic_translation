@@ -411,6 +411,18 @@ int bionic_pthread_attr_getdetachstate(bionic_attr_t *attr, int *detachstate)
 	return pthread_attr_getdetachstate(attr->glibc, detachstate);
 }
 
+pid_t bionic_pthread_gettid_np(bionic_pthread_t thread)
+{
+	if (!thread) return -1;
+	clockid_t clock;
+	if (pthread_getcpuclockid((pthread_t)thread, &clock)) return -1;
+	// Linux per-thread CPU clock IDs encode the TID in the complemented
+	// upper bits. Ask libc for the clock instead of reading its private TCB.
+	if (((uint32_t)clock & 7) != 6) return -1;
+	pid_t tid = (pid_t)(~(uint32_t)clock >> 3);
+	return tid > 0 ? tid : -1;
+}
+
 int bionic_pthread_create(bionic_pthread_t *thread, const bionic_attr_t *attr, void* (*start)(void*), void *arg)
 {
 	assert(thread && (!attr || IS_MAPPED(attr)));
