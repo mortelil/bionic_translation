@@ -22,6 +22,7 @@ extern int bionic___register_atfork(void (*)(void), void (*)(void), void (*)(voi
 extern void bionic___cxa_finalize(void *);
 extern char *bionic___strncat_chk(char *, const char *, size_t, size_t);
 extern size_t bionic___fread_chk(void *, size_t, size_t, FILE *, size_t);
+extern void *bionic___memchr_chk(const void *, int, size_t, size_t);
 static int order;
 static void prep1(void) { order = order * 10 + 1; }
 static void prep2(void) { order = order * 10 + 2; }
@@ -37,6 +38,7 @@ static void invalid_pread(void) { char b[1]; bionic___pread_chk(-1,b,2,0,1); }
 static void invalid_poll(void) { struct pollfd p; bionic___poll_chk(&p,2,0,sizeof p); }
 static void invalid_link(void) { char b[1]; bionic___readlink_chk("missing",b,2,1); }
 static void invalid_fread(void) { char b[1]; bionic___fread_chk(b,1,2,stdin,sizeof b); }
+static void invalid_memchr(void) { char b[1]={0}; bionic___memchr_chk(b,0,2,sizeof b); }
 static void aborts(void (*f)(void)) {
 	pid_t p = fork(); assert(p >= 0);
 	if (!p) { f(); _exit(99); }
@@ -44,6 +46,12 @@ static void aborts(void (*f)(void)) {
 }
 int main(void) {
 	struct rlimit r = {0,0}; setrlimit(RLIMIT_CORE,&r);
+	unsigned char bytes[]={0, 0xff, 2};
+	assert(bionic___memchr_chk(bytes,255,3,3)==bytes+1);
+	assert(bionic___memchr_chk(bytes,0,0,3)==NULL);
+	assert(bionic___memchr_chk(bytes,2,2,3)==NULL);
+	aborts(invalid_memchr);
+	puts("PASS: fortified memchr binary bytes, scan limit, zero count and overflow rejection");
 	char cat[6]="ab";
 	assert(bionic___strncat_chk(cat,"cdef",3,sizeof cat)==cat && !strcmp(cat,"abcde"));
 	assert(bionic___strncat_chk(cat,"x",0,sizeof cat)==cat && !strcmp(cat,"abcde"));

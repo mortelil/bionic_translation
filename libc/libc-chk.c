@@ -213,6 +213,15 @@ size_t bionic___fread_chk(void *__restrict buf, size_t size, size_t count, FILE 
 	return fread(buf, size, count, bionic_file_to_glibc_file(stream));
 }
 
+void *bionic___memchr_chk(const void *buffer, int value, size_t count, size_t buffer_size)
+{
+	if (count > buffer_size) {
+		fprintf(stderr, "memchr: prevented read past end of buffer\n");
+		abort();
+	}
+	return memchr(buffer, value, count);
+}
+
 size_t bionic___fwrite_chk(const void *__restrict buf, size_t size, size_t count, FILE *__restrict stream, size_t buf_size)
 {
 	size_t total;
