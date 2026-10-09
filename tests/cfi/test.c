@@ -43,6 +43,7 @@ int main(int argc, char **argv) {
     int diag = 0; bionic___cfi_slowpath_diag(valid, target, &diag); assert(diag == 73);
     rejected(0, target, SIGILL); dlclose(module);
     bionic___cfi_slowpath(0, (void *)puts);
+    bionic___cfi_slowpath(0, (void *)main);
     rejected(valid, NULL, SIGABRT);
     rejected(valid, &diag, SIGABRT);
     void *heap = malloc(32); rejected(valid, heap, SIGABRT); free(heap);

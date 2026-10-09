@@ -246,9 +246,83 @@ int bionic_dladdr(const void *addr, Dl_info *info)
 	return ret;
 }
 
+/* Host loader enumeration keeps mappings valid during this callback. Looking
+ * up the local ELF symbol avoids dlopen notifications on every JNI call. */
+struct host_cfi_request { uint64_t type; void *target, *diagnostic; };
+
+static uintptr_t host_dynamic_pointer(ElfW(Addr) base, ElfW(Addr) value)
+{
+	// glibc relocates these entries in memory; musl retains ELF-relative values.
+	return value >= base ? value : base + value;
+}
+
+static int check_host_cfi(struct dl_phdr_info *info, size_t size, void *data)
+{
+	struct host_cfi_request *request = data;
+	bool contains = false;
+	const ElfW(Dyn) *dynamic = NULL;
+	for (size_t i = 0; i < info->dlpi_phnum; i++) {
+		const ElfW(Phdr) *p = &info->dlpi_phdr[i];
+		uintptr_t start = info->dlpi_addr + p->p_vaddr;
+		if (p->p_type == PT_LOAD && (uintptr_t)request->target >= start &&
+		    (uintptr_t)request->target - start < p->p_memsz) contains = true;
+		if (p->p_type == PT_DYNAMIC) dynamic = (void *)start;
+	}
+	if (!contains) return 0;
+	if (!dynamic) return 1; // Known non-instrumented executable mapping.
+	const ElfW(Sym) *symbols = NULL;
+	const char *strings = NULL;
+	const uint32_t *gnu = NULL, *sysv = NULL;
+	for (const ElfW(Dyn) *d = dynamic; d->d_tag != DT_NULL; d++) {
+		uintptr_t pointer = host_dynamic_pointer(info->dlpi_addr, d->d_un.d_ptr);
+		switch (d->d_tag) {
+		case DT_SYMTAB: symbols = (void *)pointer; break;
+		case DT_STRTAB: strings = (void *)pointer; break;
+		case DT_GNU_HASH: gnu = (void *)pointer; break;
+		case DT_HASH: sysv = (void *)pointer; break;
+		}
+	}
+	const ElfW(Sym) *found = NULL;
+	const char *name = "__cfi_check";
+	if (symbols && strings && gnu && gnu[0]) {
+		uint32_t hash = 5381;
+		for (const unsigned char *c = (const unsigned char *)name; *c; c++) hash = hash * 33 + *c;
+		const uint32_t *buckets = gnu + 4 + gnu[2] * (sizeof(ElfW(Addr)) / sizeof(uint32_t));
+		const uint32_t *chains = buckets + gnu[0];
+		uint32_t index = buckets[hash % gnu[0]];
+		if (index >= gnu[1]) {
+			for (;;) {
+				uint32_t entry = chains[index - gnu[1]];
+				if ((entry | 1) == (hash | 1) && !strcmp(strings + symbols[index].st_name, name)) {
+					found = &symbols[index]; break;
+				}
+				if (entry & 1) break;
+				index++;
+			}
+		}
+	} else if (symbols && strings && sysv && sysv[0]) {
+		uint32_t hash = 0;
+		for (const unsigned char *c = (const unsigned char *)name; *c; c++) {
+			hash = (hash << 4) + *c;
+			uint32_t high = hash & 0xf0000000;
+			hash ^= high >> 24;
+			hash &= ~high;
+		}
+		const uint32_t *buckets = sysv + 2, *chains = buckets + sysv[0];
+		for (uint32_t index = buckets[hash % sysv[0]]; index && index < sysv[1]; index = chains[index]) {
+			if (!strcmp(strings + symbols[index].st_name, name)) { found = &symbols[index]; break; }
+		}
+	}
+	if (found && found->st_shndx != SHN_UNDEF) {
+		void (*check)(uint64_t, void *, void *) = (void *)(info->dlpi_addr + found->st_value);
+		check(request->type, request->target, request->diagnostic);
+	}
+	return 1;
+}
+
 /* Cross-DSO CFI: consult the target module's check, never a dependency's.
  * The loader lock keeps Android mappings alive through the check. Host modules
- * are pinned with RTLD_NOLOAD instead. No shadow table is needed for this slow
+ * are inspected within the host loader enumeration instead. No shadow table is needed for this slow
  * implementation; removing a module removes its eligibility automatically.
  */
 void bionic___cfi_slowpath_diag(uint64_t type, void *target, void *diagnostic)
@@ -276,27 +350,8 @@ void bionic___cfi_slowpath_diag(uint64_t type, void *target, void *diagnostic)
 	}
 	pthread_mutex_unlock(&apkenv_dl_lock);
 
-	Dl_info info, check_info;
-	if (dladdr(target, &info) && info.dli_fname) {
-		void *host = dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
-		if (host) {
-			struct link_map *map = NULL;
-			// dladdr's result was obtained before pinning. Do not accept a
-			// replacement mapping loaded at another address in that interval.
-			if (dlinfo(host, RTLD_DI_LINKMAP, &map) != 0 || !map ||
-			    (void *)(uintptr_t)map->l_addr != info.dli_fbase) {
-				dlclose(host);
-				fprintf(stderr, "CFI: host module changed during lookup\n");
-				abort();
-			}
-			cfi_check check = (cfi_check)dlsym(host, "__cfi_check");
-			if (check && dladdr((void *)check, &check_info) &&
-			    check_info.dli_fbase == info.dli_fbase)
-				check(type, target, diagnostic);
-			dlclose(host);
-			return;
-		}
-	}
+	struct host_cfi_request request = {type, target, diagnostic};
+	if (dl_iterate_phdr(check_host_cfi, &request)) return;
 	fprintf(stderr, "CFI: target %p is not in an accessible loaded module\n", target);
 	abort();
 invalid:
