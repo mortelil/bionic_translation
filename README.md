@@ -93,3 +93,11 @@ After installing the private runtime, run `sh tests/mobile/run.sh` inside Alpine
 The suite now also requires `clang` and `lld` for real cross-DSO CFI fixtures.
 See `tests/cfi/README.md` and `tests/thread-atexit/README.md` for scope and known
 limits. The thread-exit adapter uses the host GCC `libstdc++.so.6` runtime.
+
+The property callback adapter reads the existing ATL SDK/fingerprint properties.
+SDK value and revision share an atomic snapshot; callbacks run without a held
+lock and may reenter the property API. Tests check cookie delivery, value/serial
+consistency, unchanged-value revision stability and reentrant reads. This is not
+a general Android property service: dynamic property creation, persistence,
+notifications and waits remain unsupported. API contract reference:
+https://android.googlesource.com/platform/bionic/+/master/libc/include/sys/system_properties.h

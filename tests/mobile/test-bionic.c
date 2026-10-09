@@ -6,6 +6,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/resource.h>
 #include <sys/sendfile.h>
@@ -31,6 +32,18 @@ extern int bionic___system_property_read(const void *, char *, char *);
 extern ssize_t bionic___sendto_chk(int, const void *, size_t, size_t, int, const struct sockaddr *, socklen_t);
 extern ssize_t bionic___recvfrom_chk(int, void *, size_t, size_t, int, struct sockaddr *, socklen_t *);
 extern char *bionic___getcwd_chk(char *, size_t, size_t);
+extern void bionic___system_property_read_callback(const void *, void (*)(void *, const char *, const char *, uint32_t), void *);
+struct property_result { int called; char value[92]; uint32_t serial; };
+static void property_callback(void *cookie, const char *name, const char *value, uint32_t serial)
+{
+	struct property_result *result = cookie;
+	assert(!strcmp(name, "ro.build.version.sdk"));
+	result->called++;
+	strcpy(result->value, value);
+	result->serial = serial;
+	char nested[92];
+	assert(__system_property_get(name, nested) > 0); // reentrant read
+}
 static int order;
 static void prep1(void) { order = order * 10 + 1; }
 static void prep2(void) { order = order * 10 + 2; }
@@ -93,7 +106,17 @@ int main(void) {
 	assert(!bionic___system_property_find("atl.nonexistent"));
 	assert(bionic_set_android_sdk_version(0)==-1 && errno==EINVAL);
 	assert(__system_property_get("ro.build.version.sdk",property)==2 && !strcmp(property,"28"));
+	struct property_result first = {0}, repeated = {0}, changed = {0};
+	bionic___system_property_read_callback(sdk, property_callback, &first);
+	assert(first.called == 1 && !strcmp(first.value, "28"));
+	assert(!bionic_set_android_sdk_version(28));
+	bionic___system_property_read_callback(sdk, property_callback, &repeated);
+	assert(repeated.called == 1 && repeated.serial == first.serial);
+	assert(!bionic_set_android_sdk_version(29));
+	bionic___system_property_read_callback(sdk, property_callback, &changed);
+	assert(changed.called == 1 && !strcmp(changed.value, "29") && changed.serial != first.serial);
 	assert(!bionic_set_android_sdk_version(21));
+	puts("PASS: property callback cookie, consistent value/serial, stable revision and reentrant read");
 	puts("PASS: selected SDK property, stable property handle and invalid version rejection");
 	unsigned char bytes[]={0, 0xff, 2};
 	assert(bionic___memchr_chk(bytes,255,3,3)==bytes+1);

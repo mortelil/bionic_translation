@@ -9,6 +9,7 @@
 #include <setjmp.h>
 #include <signal.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,24 +62,40 @@ struct bionic_sigaction {
 #define PROP_NAME_MAX  32
 #define PROP_VALUE_MAX 92
 
-static int android_sdk_version = 21;
+// Snapshot the selected SDK and its revision together, including concurrent readers.
+static uint64_t android_sdk_state = 21;
 
 int bionic_set_android_sdk_version(int version)
 {
 	if (version < 1) { errno = EINVAL; return -1; }
-	__atomic_store_n(&android_sdk_version, version, __ATOMIC_RELEASE);
+	uint64_t old = __atomic_load_n(&android_sdk_state, __ATOMIC_ACQUIRE);
+	while ((uint32_t)old != (uint32_t)version) {
+		uint32_t serial = (uint32_t)(old >> 32) + 2;
+		uint64_t next = ((uint64_t)serial << 32) | (uint32_t)version;
+		if (__atomic_compare_exchange_n(&android_sdk_state, &old, next, false,
+		                                __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)) break;
+	}
+	return 0;
+}
+
+int bionic_read_property_snapshot(const char *name, char *value, uint32_t *serial)
+{
+	if (!strcmp(name, "ro.build.version.sdk")) {
+		uint64_t state = __atomic_load_n(&android_sdk_state, __ATOMIC_ACQUIRE);
+		int length = snprintf(value, PROP_VALUE_MAX, "%u", (uint32_t)state);
+		*serial = ((uint32_t)(state >> 32) & 0x00fffffe) | ((uint32_t)length << 24);
+		return length;
+	}
+	*value = 0;
+	*serial = 0;
 	return 0;
 }
 
 int __system_property_get(const char *name, char *value)
 {
 	verbose("%s", name);
-
-	if (!strcmp(name, "ro.build.version.sdk"))
-		return snprintf(value, PROP_VALUE_MAX, "%d", __atomic_load_n(&android_sdk_version, __ATOMIC_ACQUIRE));
-
-	*value = 0;
-	return 0;
+	uint32_t serial;
+	return bionic_read_property_snapshot(name, value, &serial);
 }
 
 pid_t gettid(void)

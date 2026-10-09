@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <locale.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,6 +43,18 @@ int bionic___system_property_read(const struct prop_info *prop_info, char *name,
 	}
 
 	return strlen(value);
+}
+
+extern int bionic_read_property_snapshot(const char *, char *, uint32_t *);
+
+void bionic___system_property_read_callback(const struct prop_info *property,
+        void (*callback)(void *, const char *, const char *, uint32_t), void *cookie)
+{
+	char value[PROP_VALUE_MAX];
+	uint32_t serial;
+	bionic_read_property_snapshot(property->name, value, &serial);
+	// No lock is held across user code: callbacks may reenter the property API.
+	callback(cookie, property->name, value, serial);
 }
 
 // actually misc stuff
