@@ -275,6 +275,7 @@ extern soinfo apkenv_libdl_info;
 soinfo *apkenv_find_library(const char *name, const bool try_glibc, int glibc_flags, void **glibc_handle);
 unsigned apkenv_unload_library(soinfo *si);
 ElfW(Sym) *apkenv_lookup_in_library(soinfo **found, const char *name);
+ElfW(Sym) *apkenv_lookup_local_symbol(soinfo *si, const char *name);
 ElfW(Sym) *apkenv_lookup(const char *name, soinfo **found, soinfo *start);
 soinfo *apkenv_find_containing_library(const void *addr);
 ElfW(Sym) *apkenv_find_containing_symbol(const void *addr, soinfo *si);

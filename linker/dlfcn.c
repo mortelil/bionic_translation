@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 #include <dlfcn.h>
+#include <errno.h>
 #include <gelf.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -243,6 +244,155 @@ int bionic_dladdr(const void *addr, Dl_info *info)
 		return dladdr(addr, info);
 
 	return ret;
+}
+
+/* Cross-DSO CFI: consult the target module's check, never a dependency's.
+ * The loader lock keeps Android mappings alive through the check. Host modules
+ * are pinned with RTLD_NOLOAD instead. No shadow table is needed for this slow
+ * implementation; removing a module removes its eligibility automatically.
+ */
+void bionic___cfi_slowpath_diag(uint64_t type, void *target, void *diagnostic)
+{
+	typedef void (*cfi_check)(uint64_t, void *, void *);
+	pthread_mutex_lock(&apkenv_dl_lock);
+	soinfo *si = apkenv_find_containing_library(target);
+	if (si) {
+		bool mapped = false;
+		for (size_t i = 0; i < si->phnum; i++) {
+			const ElfW(Phdr) *p = &si->phdr[i];
+			uintptr_t start = si->base + p->p_vaddr;
+			if (p->p_type == PT_LOAD && (uintptr_t)target >= start &&
+			    (uintptr_t)target - start < p->p_memsz)
+				mapped = true;
+		}
+		if (!mapped) goto invalid;
+		ElfW(Sym) *sym = apkenv_lookup_local_symbol(si, "__cfi_check");
+		if (sym && sym->st_shndx != SHN_UNDEF) {
+			cfi_check check = (cfi_check)(uintptr_t)(si->base + sym->st_value);
+			check(type, target, diagnostic);
+		}
+		pthread_mutex_unlock(&apkenv_dl_lock);
+		return; // Known non-instrumented modules are unchecked by the CFI ABI.
+	}
+	pthread_mutex_unlock(&apkenv_dl_lock);
+
+	Dl_info info, check_info;
+	if (dladdr(target, &info) && info.dli_fname) {
+		void *host = dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
+		if (host) {
+			struct link_map *map = NULL;
+			// dladdr's result was obtained before pinning. Do not accept a
+			// replacement mapping loaded at another address in that interval.
+			if (dlinfo(host, RTLD_DI_LINKMAP, &map) != 0 || !map ||
+			    (void *)(uintptr_t)map->l_addr != info.dli_fbase) {
+				dlclose(host);
+				fprintf(stderr, "CFI: host module changed during lookup\n");
+				abort();
+			}
+			cfi_check check = (cfi_check)dlsym(host, "__cfi_check");
+			if (check && dladdr((void *)check, &check_info) &&
+			    check_info.dli_fbase == info.dli_fbase)
+				check(type, target, diagnostic);
+			dlclose(host);
+			return;
+		}
+	}
+	fprintf(stderr, "CFI: target %p is not in an accessible loaded module\n", target);
+	abort();
+invalid:
+	pthread_mutex_unlock(&apkenv_dl_lock);
+	fprintf(stderr, "CFI: target %p is outside the module's load segments\n", target);
+	abort();
+}
+
+void bionic___cfi_slowpath(uint64_t type, void *target)
+{
+	bionic___cfi_slowpath_diag(type, target, NULL);
+}
+
+static pthread_once_t thread_atexit_once = PTHREAD_ONCE_INIT;
+static int (*host_thread_atexit)(void (*)(void *), void *, void *);
+static char thread_atexit_dso;
+
+static void init_thread_atexit(void)
+{
+	// Use the host C++ runtime's ordering relative to pthread-key destruction
+	// and its main-thread exit handling. Keep this backend loaded for callbacks.
+	void *runtime = dlopen("libstdc++.so.6", RTLD_NOW | RTLD_LOCAL);
+	if (runtime) host_thread_atexit = dlsym(runtime, "__cxa_thread_atexit");
+}
+
+struct thread_destructor {
+	void (*function)(void *);
+	void *object;
+	soinfo *owner, *code_owner;
+	struct thread_destructor *next;
+	bool ran;
+};
+static _Thread_local struct thread_destructor *thread_destructors;
+
+static void release_thread_destructor(struct thread_destructor *entry)
+{
+	pthread_mutex_lock(&apkenv_dl_lock);
+	if (entry->owner) apkenv_unload_library(entry->owner);
+	if (entry->code_owner) apkenv_unload_library(entry->code_owner);
+	pthread_mutex_unlock(&apkenv_dl_lock);
+}
+
+static void execute_thread_destructor(struct thread_destructor *entry)
+{
+	thread_destructors = entry->next;
+	struct thread_destructor *older = thread_destructors;
+	entry->function(entry->object);
+	entry->ran = true;
+	release_thread_destructor(entry);
+	// Some host runtimes detach an entire batch before calling destructors.
+	// New Android registrations must still precede older Android objects.
+	while (thread_destructors != older)
+		execute_thread_destructor(thread_destructors);
+}
+
+static void run_thread_destructor(void *data)
+{
+	struct thread_destructor *entry = data;
+	if (!entry->ran) {
+		while (thread_destructors != entry)
+			execute_thread_destructor(thread_destructors);
+		execute_thread_destructor(entry);
+	}
+	// Entries run early remain as tokens until the host consumes its callback.
+	free(entry);
+}
+
+int bionic___cxa_thread_atexit_impl(void (*function)(void *), void *object, void *dso)
+{
+	pthread_once(&thread_atexit_once, init_thread_atexit);
+	if (!host_thread_atexit) { errno = ENOSYS; return -1; }
+	struct thread_destructor *entry = malloc(sizeof(*entry));
+	if (!entry) return -1;
+	entry->function = function;
+	entry->object = object;
+	entry->ran = false;
+	pthread_mutex_lock(&apkenv_dl_lock);
+	entry->owner = apkenv_find_containing_library(dso);
+	entry->code_owner = apkenv_find_containing_library((void *)function);
+	if (entry->code_owner == entry->owner) entry->code_owner = NULL;
+	if (entry->owner) entry->owner->refcount++;
+	if (entry->code_owner) entry->code_owner->refcount++;
+	pthread_mutex_unlock(&apkenv_dl_lock);
+	if (!entry->owner && !entry->code_owner) {
+		free(entry);
+		return host_thread_atexit(function, object, dso);
+	}
+	int result = host_thread_atexit(run_thread_destructor, entry, &thread_atexit_dso);
+	if (result) {
+		release_thread_destructor(entry);
+		free(entry);
+	} else {
+		entry->next = thread_destructors;
+		thread_destructors = entry;
+	}
+	return result;
 }
 
 int bionic_dlclose(void *handle)

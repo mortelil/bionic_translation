@@ -86,3 +86,10 @@ end
 This will break in the function that is trying to notify gdb, and use the information that's passed
 to this function to effectively do what the function should be doing already but for whatever reason
 fails at.
+
+### Experimental mobile compatibility tests
+
+After installing the private runtime, run `sh tests/mobile/run.sh` inside Alpine.
+The suite now also requires `clang` and `lld` for real cross-DSO CFI fixtures.
+See `tests/cfi/README.md` and `tests/thread-atexit/README.md` for scope and known
+limits. The thread-exit adapter uses the host GCC `libstdc++.so.6` runtime.

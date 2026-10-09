@@ -249,6 +249,8 @@ static void apkenv_remove_soinfo_from_debug_map(soinfo *info)
 {
 	struct link_map *map = &(info->linkmap);
 
+	if (apkenv_r_debug_head == map)
+		apkenv_r_debug_head = map->l_next;
 	if (apkenv_r_debug_tail == map)
 		apkenv_r_debug_tail = map->l_prev;
 
@@ -313,13 +315,17 @@ void apkenv_notify_gdb_of_libraries(void)
 
 	/* append android libs before notifying gdb */
 	tmap->l_next = apkenv_r_debug_head;
-	apkenv_r_debug_head->l_prev = tmap;
+	struct link_map *saved_prev = apkenv_r_debug_head ? apkenv_r_debug_head->l_prev : NULL;
+	if (apkenv_r_debug_head)
+		apkenv_r_debug_head->l_prev = tmap;
 
 	_r_debug_ptr->r_state = RT_CONSISTENT;
 	rtld_db_dlactivity();
 
 	/* restore so that ld-linux doesn't freak out */
 	tmap->l_next = NULL;
+	if (apkenv_r_debug_head)
+		apkenv_r_debug_head->l_prev = saved_prev;
 }
 
 static soinfo *apkenv_alloc_info(const char *name)
@@ -558,6 +564,11 @@ static ElfW(Sym) * apkenv__elf_lookup(soinfo *si, struct symbol_name *symbol_nam
 }
 
 const char *apkenv_last_library_used = NULL;
+
+ElfW(Sym) *apkenv_lookup_local_symbol(soinfo *si, const char *name)
+{
+	return apkenv__elf_lookup(si, &(struct symbol_name){ .name = name });
+}
 
 static ElfW(Sym) *
     apkenv__do_lookup(soinfo *si, const char *name, ElfW(Addr) * base)
