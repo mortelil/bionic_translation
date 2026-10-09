@@ -425,24 +425,24 @@ _Unwind_Ptr bionic_dl_unwind_find_exidx(_Unwind_Ptr pc, int *pcount)
 /* Here, we only have to provide a callback to iterate across all the
  * loaded libraries. gcc_eh does the rest. We also use this ourselves,
  * so compile this even on 32bit arm */
-int bionic_dl_iterate_phdr(int (*cb)(struct dl_phdr_info *info, size_t size, void *data),
-			   void *data)
+// Called with the Android loader lock held. Failed or incomplete mappings
+// have no usable program headers and must never reach unwind callbacks.
+int apkenv_dl_iterate_phdr(int (*cb)(struct dl_phdr_info *info, size_t size, void *data),
+                         void *data)
 {
-	soinfo *si;
-	struct dl_phdr_info dl_info;
-	int rv = 0;
-	for (si = apkenv_solist; si != NULL; si = si->next) {
-		dl_info.dlpi_addr = si->linkmap.l_addr;
-		dl_info.dlpi_name = si->linkmap.l_name;
-		dl_info.dlpi_phdr = (void *)si->phdr;
-		dl_info.dlpi_phnum = si->phnum;
-		if ((rv = cb(&dl_info, sizeof(struct dl_phdr_info), data)) != 0)
-			break;
+	for (soinfo *si = apkenv_solist; si != NULL; si = si->next) {
+		if (!(si->flags & FLAG_LINKED) || (si->flags & FLAG_ERROR) || !si->phdr || !si->phnum)
+			continue;
+		struct dl_phdr_info info = {0};
+		info.dlpi_addr = si->base;
+		info.dlpi_name = si->fullpath;
+		info.dlpi_phdr = si->phdr;
+		info.dlpi_phnum = si->phnum;
+		// Only advertise the fields we implement; no synthetic TLS/counters.
+		int result = cb(&info, offsetof(struct dl_phdr_info, dlpi_adds), data);
+		if (result) return result;
 	}
-	if (rv)
-		return rv;
-	else
-		return dl_iterate_phdr(cb, data);
+	return 0;
 }
 
 static inline bool is_gnu_hash(soinfo *si)

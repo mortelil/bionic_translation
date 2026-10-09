@@ -285,9 +285,9 @@ void apkenv_call_constructors_recursive(soinfo *si);
 #if defined(__arm__)
 typedef long unsigned int *_Unwind_Ptr;
 _Unwind_Ptr apkenv_dl_unwind_find_exidx(_Unwind_Ptr pc, int *pcount);
-#elif defined(__aarch64__) || defined(__i386__) || defined(__mips__) || defined(__x86_64__)
-int apkenv_dl_iterate_phdr(int (*cb)(struct dl_phdr_info *, size_t, void *), void *);
 #endif
+int apkenv_dl_iterate_phdr(int (*cb)(struct dl_phdr_info *, size_t, void *), void *);
+int bionic_dl_iterate_phdr(int (*cb)(struct dl_phdr_info *, size_t, void *), void *);
 
 void apkenv_notify_gdb_of_libraries(void);
 int apkenv_add_sopath(const char *path);

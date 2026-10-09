@@ -60,6 +60,14 @@ static const char *dl_errors[] = {
 
 static pthread_mutex_t apkenv_dl_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 
+int bionic_dl_iterate_phdr(int (*cb)(struct dl_phdr_info *, size_t, void *), void *data)
+{
+	pthread_mutex_lock(&apkenv_dl_lock);
+	int result = apkenv_dl_iterate_phdr(cb, data);
+	pthread_mutex_unlock(&apkenv_dl_lock);
+	return result ? result : dl_iterate_phdr(cb, data);
+}
+
 static void set_dlerror(int err)
 {
 	format_buffer(dl_err_buf, sizeof(dl_err_buf), "%s: %s", dl_errors[err],

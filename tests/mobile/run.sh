@@ -16,3 +16,4 @@ cc "$repo/tests/mobile/test-thread-id.c" -L "$prefix/lib" -lpthread_bio -pthread
 timeout 30 "$out/test-thread-id"
 sh "$repo/tests/cfi/run.sh"
 sh "$repo/tests/thread-atexit/run.sh"
+sh "$repo/tests/iterate-phdr/run.sh"
