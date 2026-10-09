@@ -20,6 +20,7 @@ extern int bionic_fstatat64(int, const char *, struct stat *, int);
 extern ssize_t bionic_sendfile64(int, int, off_t *, size_t);
 extern int bionic___register_atfork(void (*)(void), void (*)(void), void (*)(void), void *);
 extern void bionic___cxa_finalize(void *);
+extern char *bionic___strncat_chk(char *, const char *, size_t, size_t);
 static int order;
 static void prep1(void) { order = order * 10 + 1; }
 static void prep2(void) { order = order * 10 + 2; }
@@ -27,6 +28,9 @@ static void par1(void) { order = order * 10 + 3; }
 static void par2(void) { order = order * 10 + 4; }
 static void ch1(void) { order = order * 10 + 5; }
 static void ch2(void) { order = order * 10 + 6; }
+static void invalid_concat(void) { char b[3]="ab"; bionic___strncat_chk(b,"c",1,sizeof b); }
+static void unterminated_concat(void) { char b[2]={'a','b'}; bionic___strncat_chk(b,"",0,sizeof b); }
+static void zero_concat(void) { char b[1]; bionic___strncat_chk(b,"",0,0); }
 static void invalid_open(void) { bionic___openat_2(AT_FDCWD, "bad", O_CREAT); }
 static void invalid_pread(void) { char b[1]; bionic___pread_chk(-1,b,2,0,1); }
 static void invalid_poll(void) { struct pollfd p; bionic___poll_chk(&p,2,0,sizeof p); }
@@ -38,6 +42,16 @@ static void aborts(void (*f)(void)) {
 }
 int main(void) {
 	struct rlimit r = {0,0}; setrlimit(RLIMIT_CORE,&r);
+	char cat[6]="ab";
+	assert(bionic___strncat_chk(cat,"cdef",3,sizeof cat)==cat && !strcmp(cat,"abcde"));
+	assert(bionic___strncat_chk(cat,"x",0,sizeof cat)==cat && !strcmp(cat,"abcde"));
+	assert(bionic___strncat_chk(cat,"",(size_t)-1,sizeof cat)==cat && !strcmp(cat,"abcde"));
+	char shortcat[4]="a";
+	assert(bionic___strncat_chk(shortcat,"b",(size_t)-1,sizeof shortcat)==shortcat && !strcmp(shortcat,"ab"));
+	char raw[2]={'x','y'}, exact[3]="";
+	assert(bionic___strncat_chk(exact,raw,2,sizeof exact)==exact && !strcmp(exact,"xy"));
+	aborts(invalid_concat); aborts(unterminated_concat); aborts(zero_concat);
+	puts("PASS: fortified strncat exact fit, truncation, zero count, unterminated source and overflow rejection");
 	FILE *file = tmpfile(); assert(file);
 	assert(write(fileno(file),"abcdef",6)==6);
 	char b[16]={0}; assert(bionic___pread_chk(fileno(file),b,3,2,sizeof b)==3);

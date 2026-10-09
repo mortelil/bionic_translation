@@ -22,6 +22,30 @@
 /* musl needs these, glibc implements them (and probably did even before bionic) */
 #ifndef __GLIBC__
 
+char *bionic___strncat_chk(char *__restrict dst, const char *__restrict src,
+			 size_t count, size_t dst_size)
+{
+	size_t used = strnlen(dst, dst_size);
+	if (used == dst_size) {
+		fprintf(stderr, "strncat: unterminated destination buffer\n");
+		abort();
+	}
+	char *out = dst + used;
+	size_t remaining = dst_size - used;
+	while (count && *src) {
+		// Reserve space for the terminating NUL, without overflowing size_t.
+		if (remaining <= 1) {
+			fprintf(stderr, "strncat: prevented write past end of buffer\n");
+			abort();
+		}
+		*out++ = *src++;
+		remaining--;
+		count--;
+	}
+	*out = '\0';
+	return dst;
+}
+
 char *bionic___strncpy_chk(char *__restrict dest, const char *__restrict src,
 			   size_t len, size_t dest_len)
 {
