@@ -61,12 +61,21 @@ struct bionic_sigaction {
 #define PROP_NAME_MAX  32
 #define PROP_VALUE_MAX 92
 
+static int android_sdk_version = 21;
+
+int bionic_set_android_sdk_version(int version)
+{
+	if (version < 1) { errno = EINVAL; return -1; }
+	__atomic_store_n(&android_sdk_version, version, __ATOMIC_RELEASE);
+	return 0;
+}
+
 int __system_property_get(const char *name, char *value)
 {
 	verbose("%s", name);
 
 	if (!strcmp(name, "ro.build.version.sdk"))
-		return snprintf(value, PROP_VALUE_MAX, "%d", 21);
+		return snprintf(value, PROP_VALUE_MAX, "%d", __atomic_load_n(&android_sdk_version, __ATOMIC_ACQUIRE));
 
 	*value = 0;
 	return 0;

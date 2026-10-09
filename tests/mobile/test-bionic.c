@@ -23,6 +23,10 @@ extern void bionic___cxa_finalize(void *);
 extern char *bionic___strncat_chk(char *, const char *, size_t, size_t);
 extern size_t bionic___fread_chk(void *, size_t, size_t, FILE *, size_t);
 extern void *bionic___memchr_chk(const void *, int, size_t, size_t);
+extern int bionic_set_android_sdk_version(int);
+extern int __system_property_get(const char *, char *);
+extern const void *bionic___system_property_find(const char *);
+extern int bionic___system_property_read(const void *, char *, char *);
 static int order;
 static void prep1(void) { order = order * 10 + 1; }
 static void prep2(void) { order = order * 10 + 2; }
@@ -46,6 +50,16 @@ static void aborts(void (*f)(void)) {
 }
 int main(void) {
 	struct rlimit r = {0,0}; setrlimit(RLIMIT_CORE,&r);
+	char property[92], name[32];
+	assert(!bionic_set_android_sdk_version(28));
+	assert(__system_property_get("ro.build.version.sdk",property)==2 && !strcmp(property,"28"));
+	const void *sdk=bionic___system_property_find("ro.build.version.sdk"); assert(sdk);
+	assert(bionic___system_property_read(sdk,name,property)==2 && !strcmp(property,"28") && !strcmp(name,"ro.build.version.sdk"));
+	assert(!bionic___system_property_find("atl.nonexistent"));
+	assert(bionic_set_android_sdk_version(0)==-1 && errno==EINVAL);
+	assert(__system_property_get("ro.build.version.sdk",property)==2 && !strcmp(property,"28"));
+	assert(!bionic_set_android_sdk_version(21));
+	puts("PASS: selected SDK property, stable property handle and invalid version rejection");
 	unsigned char bytes[]={0, 0xff, 2};
 	assert(bionic___memchr_chk(bytes,255,3,3)==bytes+1);
 	assert(bionic___memchr_chk(bytes,0,0,3)==NULL);

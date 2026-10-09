@@ -13,13 +13,15 @@ struct prop_info {
 
 #define PROP_NAME_MAX  32
 #define PROP_VALUE_MAX 92
+extern int __system_property_get(const char *, char *);
+static const struct prop_info sdk_property = {"ro.build.version.sdk"};
+static const struct prop_info fingerprint_property = {"ro.build.fingerprint"};
 
 const struct prop_info *bionic___system_property_find(const char *name)
 {
-	struct prop_info *ret = malloc(sizeof(struct prop_info));
-	ret->name = name;
-
-	return ret;
+	if (!strcmp(name, sdk_property.name)) return &sdk_property;
+	if (!strcmp(name, fingerprint_property.name)) return &fingerprint_property;
+	return NULL;
 }
 
 int bionic___system_property_read(const struct prop_info *prop_info, char *name, char *value)
@@ -30,7 +32,9 @@ int bionic___system_property_read(const struct prop_info *prop_info, char *name,
 	if (!value)
 		return 0;
 
-	if (!strcmp(prop_info->name, "ro.build.fingerprint")) {
+	if (!strcmp(prop_info->name, sdk_property.name)) {
+		return __system_property_get(prop_info->name, value);
+	} else if (!strcmp(prop_info->name, "ro.build.fingerprint")) {
 		strncpy(value, "", PROP_VALUE_MAX); // there is no good reason that apps should need this, so just return an empty string
 	} else {
 		printf("__system_property_find: >%s< not handled yet\n", prop_info->name);
