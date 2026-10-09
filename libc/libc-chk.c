@@ -214,6 +214,15 @@ size_t bionic___fread_chk(void *__restrict buf, size_t size, size_t count, FILE 
 	return fread(buf, size, count, bionic_file_to_glibc_file(stream));
 }
 
+char *bionic___getcwd_chk(char *buffer, size_t size, size_t buffer_size)
+{
+	if (size > buffer_size) {
+		fprintf(stderr, "getcwd: prevented write past end of buffer\n");
+		abort();
+	}
+	return getcwd(buffer, size);
+}
+
 ssize_t bionic___sendto_chk(int socket, const void *buffer, size_t length,
 		size_t buffer_size, int flags, const struct sockaddr *address, socklen_t address_length)
 {

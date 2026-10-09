@@ -30,6 +30,7 @@ extern const void *bionic___system_property_find(const char *);
 extern int bionic___system_property_read(const void *, char *, char *);
 extern ssize_t bionic___sendto_chk(int, const void *, size_t, size_t, int, const struct sockaddr *, socklen_t);
 extern ssize_t bionic___recvfrom_chk(int, void *, size_t, size_t, int, struct sockaddr *, socklen_t *);
+extern char *bionic___getcwd_chk(char *, size_t, size_t);
 static int order;
 static void prep1(void) { order = order * 10 + 1; }
 static void prep2(void) { order = order * 10 + 2; }
@@ -48,6 +49,7 @@ static void invalid_fread(void) { char b[1]; bionic___fread_chk(b,1,2,stdin,size
 static void invalid_memchr(void) { char b[1]={0}; bionic___memchr_chk(b,0,2,sizeof b); }
 static void invalid_sendto(void) { char b[1]={0}; bionic___sendto_chk(-1,b,2,sizeof b,0,NULL,0); }
 static void invalid_recvfrom(void) { char b[1]; bionic___recvfrom_chk(-1,b,2,sizeof b,0,NULL,NULL); }
+static void invalid_getcwd(void) { char b[1]; bionic___getcwd_chk(b,2,sizeof b); }
 static void aborts(void (*f)(void)) {
 	pid_t p = fork(); assert(p >= 0);
 	if (!p) { f(); _exit(99); }
@@ -55,6 +57,14 @@ static void aborts(void (*f)(void)) {
 }
 int main(void) {
 	struct rlimit r = {0,0}; setrlimit(RLIMIT_CORE,&r);
+	char cwd[4096], checked_cwd[4096]; assert(getcwd(cwd,sizeof cwd));
+	memset(checked_cwd,0x5a,sizeof checked_cwd);
+	size_t cwd_size=strlen(cwd)+1; assert(cwd_size < sizeof checked_cwd);
+	assert(bionic___getcwd_chk(checked_cwd,cwd_size,cwd_size)==checked_cwd && !strcmp(cwd,checked_cwd) && checked_cwd[cwd_size]==0x5a);
+	errno=0; assert(bionic___getcwd_chk(checked_cwd,1,sizeof checked_cwd)==NULL && errno==ERANGE);
+	errno=0; assert(bionic___getcwd_chk(checked_cwd,0,sizeof checked_cwd)==NULL && errno==EINVAL);
+	aborts(invalid_getcwd);
+	puts("PASS: fortified getcwd exact buffer, path contents, capacity/zero errors and overflow rejection");
 	int sockets[2]; assert(socketpair(AF_UNIX, SOCK_DGRAM, 0, sockets)==0);
 	unsigned char payload[]={0, 0xff, 2}, received[8];
 	assert(bionic___sendto_chk(sockets[0],payload,3,sizeof payload,0,NULL,0)==3);
