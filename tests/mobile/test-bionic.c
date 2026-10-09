@@ -21,6 +21,7 @@ extern ssize_t bionic_sendfile64(int, int, off_t *, size_t);
 extern int bionic___register_atfork(void (*)(void), void (*)(void), void (*)(void), void *);
 extern void bionic___cxa_finalize(void *);
 extern char *bionic___strncat_chk(char *, const char *, size_t, size_t);
+extern size_t bionic___fread_chk(void *, size_t, size_t, FILE *, size_t);
 static int order;
 static void prep1(void) { order = order * 10 + 1; }
 static void prep2(void) { order = order * 10 + 2; }
@@ -35,6 +36,7 @@ static void invalid_open(void) { bionic___openat_2(AT_FDCWD, "bad", O_CREAT); }
 static void invalid_pread(void) { char b[1]; bionic___pread_chk(-1,b,2,0,1); }
 static void invalid_poll(void) { struct pollfd p; bionic___poll_chk(&p,2,0,sizeof p); }
 static void invalid_link(void) { char b[1]; bionic___readlink_chk("missing",b,2,1); }
+static void invalid_fread(void) { char b[1]; bionic___fread_chk(b,1,2,stdin,sizeof b); }
 static void aborts(void (*f)(void)) {
 	pid_t p = fork(); assert(p >= 0);
 	if (!p) { f(); _exit(99); }
@@ -54,6 +56,15 @@ int main(void) {
 	puts("PASS: fortified strncat exact fit, truncation, zero count, unterminated source and overflow rejection");
 	FILE *file = tmpfile(); assert(file);
 	assert(write(fileno(file),"abcdef",6)==6);
+	char readbuf[8]; memset(readbuf, 0x5a, sizeof readbuf); rewind(file);
+	assert(bionic___fread_chk(readbuf,2,3,file,6)==3 && !memcmp(readbuf,"abcdef",6) && readbuf[6]==0x5a && readbuf[7]==0x5a);
+	assert(bionic___fread_chk(readbuf,1,1,file,sizeof readbuf)==0 && feof(file));
+	rewind(file); errno=0;
+	assert(bionic___fread_chk(readbuf,(size_t)-1,2,file,sizeof readbuf)==0 && errno==EOVERFLOW && ftell(file)==0);
+	assert(bionic___fread_chk(readbuf,0,(size_t)-1,file,0)==0 && ftell(file)==0);
+	assert(bionic___fread_chk(readbuf,4,2,file,(size_t)-1)==1 && feof(file));
+	aborts(invalid_fread);
+	puts("PASS: fortified fread exact buffer, EOF, partial item, zero size and overflow checks");
 	char b[16]={0}; assert(bionic___pread_chk(fileno(file),b,3,2,sizeof b)==3);
 	assert(!memcmp(b,"cde",3)); assert(lseek(fileno(file),0,SEEK_CUR)==6);
 	int dir = open("/dev",O_DIRECTORY); assert(dir>=0);

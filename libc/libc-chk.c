@@ -18,6 +18,9 @@
 #include <unistd.h>
 #include <limits.h>
 #include <poll.h>
+#include <errno.h>
+#include <stdint.h>
+#include "libc-stdio.h"
 
 /* musl needs these, glibc implements them (and probably did even before bionic) */
 #ifndef __GLIBC__
@@ -193,6 +196,21 @@ void bionic___FD_CLR_chk(int fd, fd_set *set)
 void bionic___FD_SET_chk(int fd, fd_set *set)
 {
 	FD_SET(fd, set);
+}
+
+size_t bionic___fread_chk(void *__restrict buf, size_t size, size_t count, FILE *__restrict stream, size_t buf_size)
+{
+	// Do not let a wrapped multiplication turn a large read into an unchecked
+	// small one. Report the stdio overflow error without touching the stream.
+	if (count && size > SIZE_MAX / count) {
+		errno = EOVERFLOW;
+		return 0;
+	}
+	if (size * count > buf_size) {
+		fprintf(stderr, "fread: prevented write past end of buffer\n");
+		abort();
+	}
+	return fread(buf, size, count, bionic_file_to_glibc_file(stream));
 }
 
 size_t bionic___fwrite_chk(const void *__restrict buf, size_t size, size_t count, FILE *__restrict stream, size_t buf_size)
