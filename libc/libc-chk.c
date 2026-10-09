@@ -7,6 +7,7 @@
 
 
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 
 #include <assert.h>
@@ -211,6 +212,26 @@ size_t bionic___fread_chk(void *__restrict buf, size_t size, size_t count, FILE 
 		abort();
 	}
 	return fread(buf, size, count, bionic_file_to_glibc_file(stream));
+}
+
+ssize_t bionic___sendto_chk(int socket, const void *buffer, size_t length,
+		size_t buffer_size, int flags, const struct sockaddr *address, socklen_t address_length)
+{
+	if (length > buffer_size) {
+		fprintf(stderr, "sendto: prevented read past end of buffer\n");
+		abort();
+	}
+	return sendto(socket, buffer, length, flags, address, address_length);
+}
+
+ssize_t bionic___recvfrom_chk(int socket, void *buffer, size_t length,
+		size_t buffer_size, int flags, struct sockaddr *address, socklen_t *address_length)
+{
+	if (length > buffer_size) {
+		fprintf(stderr, "recvfrom: prevented write past end of buffer\n");
+		abort();
+	}
+	return recvfrom(socket, buffer, length, flags, address, address_length);
 }
 
 void *bionic___memchr_chk(const void *buffer, int value, size_t count, size_t buffer_size)
