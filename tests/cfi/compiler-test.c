@@ -6,6 +6,7 @@
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "trap-signal.h"
 extern void *bionic_dlopen(const char *, int);
 extern void *bionic_dlsym(void *, const char *);
 extern int bionic_dlclose(void *);
@@ -21,7 +22,7 @@ int main(int argc, char **argv) {
     pid_t child=fork(); assert(child>=0);
     if (!child) { invoke(wrong); _exit(0); }
     int status; assert(waitpid(child,&status,0)==child);
-    assert(WIFSIGNALED(status) && WTERMSIG(status)==SIGILL);
+    assert(WIFSIGNALED(status) && WTERMSIG(status)==CFI_TRAP_SIGNAL);
     bionic_dlclose(caller); bionic_dlclose(callee);
     puts("PASS: Clang cross-DSO CFI allows correct signature and traps wrong signature");
 }

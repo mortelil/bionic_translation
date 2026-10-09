@@ -9,6 +9,7 @@
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "trap-signal.h"
 extern void *bionic_dlopen(const char *, int);
 extern void *bionic_dlsym(void *, const char *);
 extern int bionic_dlclose(void *);
@@ -31,7 +32,7 @@ int main(int argc, char **argv) {
         int diag = 0;
         bionic___cfi_slowpath_diag(valid, target, &diag); assert(diag == 73);
         bionic___cfi_slowpath(valid, target);
-        rejected(0, target, SIGILL);
+        rejected(0, target, CFI_TRAP_SIGNAL);
         bionic_dlclose(module);
         rejected(valid, target, SIGABRT);
     }
@@ -41,7 +42,7 @@ int main(int argc, char **argv) {
     module = dlopen(argv[1], RTLD_NOW); assert(module);
     target = dlsym(module, "atl_cfi_target"); assert(target);
     int diag = 0; bionic___cfi_slowpath_diag(valid, target, &diag); assert(diag == 73);
-    rejected(0, target, SIGILL); dlclose(module);
+    rejected(0, target, CFI_TRAP_SIGNAL); dlclose(module);
     bionic___cfi_slowpath(0, (void *)puts);
     bionic___cfi_slowpath(0, (void *)main);
     rejected(valid, NULL, SIGABRT);
