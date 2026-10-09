@@ -853,7 +853,54 @@ static int apkenv__open_lib(const char *name)
 	return -1;
 }
 
-static int apkenv_open_library(const char *name, char *fullpath)
+// DT_RUNPATH applies only to a requesting object's direct dependencies.
+static int apkenv_open_runpath(const soinfo *requester, const char *name, char *fullpath)
+{
+	if (!requester || strchr(name, '/')) return -1;
+	const char *runpath = NULL;
+	for (const ElfW(Dyn) *d = requester->dynamic; d->d_tag != DT_NULL; ++d)
+		if (d->d_tag == DT_RUNPATH) runpath = requester->strtab + d->d_un.d_val;
+	if (!runpath) return -1;
+	char *source = strdup(requester->fullpath);
+	if (!source) return -1;
+	char *origin = realpath(dirname(source), NULL);
+	free(source);
+	if (!origin) return -1;
+	int fd = -1;
+	while (*runpath) {
+		size_t length = strcspn(runpath, ":");
+		char path[512];
+		size_t used = 0;
+		bool valid = true;
+		for (size_t i = 0; i < length;) {
+			const char *part = runpath + i;
+			size_t count = 1, consumed = 1;
+			if (length-i >= 9 && !strncmp(part, "${ORIGIN}", 9)) {
+				part = origin; count = strlen(origin); consumed = 9;
+			} else if (length-i >= 7 && !strncmp(part, "$ORIGIN", 7) &&
+			           (length-i == 7 || part[7] == '/')) {
+				part = origin; count = strlen(origin); consumed = 7;
+			} else if (*part == '$') { valid = false; break; }
+			if (used + count >= sizeof(path)) { valid = false; break; }
+			memcpy(path + used, part, count); used += count; i += consumed;
+		}
+		if (valid) {
+			if (!used) path[used++] = '.';
+			if (used + strlen(name) + 2 <= sizeof(path)) {
+				path[used++] = '/'; strcpy(path + used, name);
+				if ((fd = apkenv__open_lib(path)) >= 0) {
+					strcpy(fullpath, path); break;
+				}
+			}
+		}
+		runpath += length;
+		if (*runpath == ':') ++runpath;
+	}
+	free(origin);
+	return fd;
+}
+
+static int apkenv_open_library(const char *name, char *fullpath, const soinfo *requester)
 {
 	int fd;
 	char buf[512];
@@ -922,6 +969,8 @@ static int apkenv_open_library(const char *name, char *fullpath)
 	}
 
 	free(path_normalized_name);
+
+	if ((fd = apkenv_open_runpath(requester, name, fullpath)) >= 0) return fd;
 
 	for (path = apkenv_sopaths; *path; path++) {
 		n = format_buffer(buf, sizeof(buf), "%s/%s", *path, name);
@@ -1390,10 +1439,10 @@ get_wr_offset(int fd, const char *name, ElfW(Ehdr) *ehdr)
 #endif
 
 static soinfo *
-apkenv_load_library(const char *name, const bool try_glibc, int glibc_flag, void **_glibc_handle)
+apkenv_load_library(const char *name, const bool try_glibc, int glibc_flag, void **_glibc_handle, const soinfo *requester)
 {
 	char fullpath[512];
-	int fd = apkenv_open_library(name, fullpath);
+	int fd = apkenv_open_library(name, fullpath, requester);
 	int cnt;
 	size_t ext_sz;
 	size_t req_base;
@@ -1525,7 +1574,13 @@ apkenv_init_library(soinfo *si)
 
 extern struct override_map lib_override_map;
 
-soinfo *apkenv_find_library(const char *name, const bool try_glibc, int glibc_flag, void **glibc_handle)
+static soinfo *apkenv_find_library_from(const char *, bool, int, void **, const soinfo *);
+soinfo *apkenv_find_library(const char *name, const bool try_glibc, int flags, void **host_handle)
+{
+	return apkenv_find_library_from(name, try_glibc, flags, host_handle, NULL);
+}
+
+static soinfo *apkenv_find_library_from(const char *name, const bool try_glibc, int glibc_flag, void **glibc_handle, const soinfo *requester)
 {
 	soinfo *si;
 	const char *bname;
@@ -1573,7 +1628,7 @@ soinfo *apkenv_find_library(const char *name, const bool try_glibc, int glibc_fl
 	}
 
 	TRACE("[ %5d '%s' has not been loaded yet.  Locating...]\n", apkenv_pid, name);
-	if (!(si = apkenv_load_library(name, try_glibc, glibc_flag, glibc_handle)) || !(si = apkenv_init_library(si)))
+	if (!(si = apkenv_load_library(name, try_glibc, glibc_flag, glibc_handle, requester)) || !(si = apkenv_init_library(si)))
 		return NULL;
 
 	if (!strcmp(bname, "libstdc++.so")) {
@@ -2814,7 +2869,7 @@ static int apkenv_link_image(soinfo *si, /*unused...?*/ unsigned wr_offset)
 			DEBUG("%5d %s needs %s\n", apkenv_pid, si->name, si->strtab + d->d_un.d_val);
 			soinfo *lsi = NULL;
 			// if (get_builtin_lib_handle(si->strtab + d->d_un.d_val) == NULL)
-			lsi = apkenv_find_library(si->strtab + d->d_un.d_val, true, RTLD_NOW, NULL);
+			lsi = apkenv_find_library_from(si->strtab + d->d_un.d_val, true, RTLD_NOW, NULL, si);
 			if (lsi == 0) {
 				/**
 				 * XXX Dirty Hack Alarm --thp XXX
