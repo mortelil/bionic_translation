@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 // this seems to not be a stable ABI, so hopefully nobody treats it as such
 // FIXME: move this out into it's own file whenever we get to implementing it more properly
@@ -117,4 +118,50 @@ char* bionic___gnu_strerror_r(int error_number, char* buf, size_t buf_len) {
 	errno = saved_errno;
 	return buf;
 #endif
+}
+
+/* Android exports the large-file alias even where host off_t is already 64 bit. */
+int bionic_mkstemp64(char *path)
+{
+#ifdef __GLIBC__
+	return mkstemp64(path);
+#else
+	return mkstemp(path);
+#endif
+}
+
+/* getentropy accepts at most 256 bytes. It either fills the entire request or
+ * fails; never return partial or predictable output from the arc4random API. */
+void bionic_arc4random_buf(void *buffer, size_t length)
+{
+	unsigned char *bytes = buffer;
+	while (length != 0) {
+		size_t chunk = length > 256 ? 256 : length;
+		if (getentropy(bytes, chunk) != 0) {
+			if (errno == EINTR)
+				continue;
+			fprintf(stderr, "arc4random_buf: getentropy failed\n");
+			abort();
+		}
+		bytes += chunk;
+		length -= chunk;
+	}
+}
+
+uint32_t bionic_arc4random(void)
+{
+	uint32_t value;
+	bionic_arc4random_buf(&value, sizeof(value));
+	return value;
+}
+
+uint32_t bionic_arc4random_uniform(uint32_t upper_bound)
+{
+	if (upper_bound < 2)
+		return 0;
+	/* Reject the uneven prefix instead of introducing modulo bias. */
+	uint32_t minimum = -upper_bound % upper_bound;
+	uint32_t value;
+	do { value = bionic_arc4random(); } while (value < minimum);
+	return value % upper_bound;
 }

@@ -158,6 +158,32 @@ char *bionic___strcpy_chk(char *dest, const char *src, size_t dest_len)
 	return strcpy(dest, src);
 }
 
+/* bionic fortify entry points for the strlcpy/strlcat family. The plain
+ * strlcpy/strlcat implementations come from the underlying libc; only the
+ * _FORTIFY_SOURCE *_chk entry points are missing, and libvlc.so relocates
+ * against __strlcpy_chk. Signature/ABI follows the bionic libc fortify contract
+ * (__strlcpy_chk(dst, src, size, dst_len) where size is the requested length and
+ * dst_len the compiler-known destination size), as in bionic
+ * libc/bionic/__strlcpy_chk.cpp / __strlcat_chk.cpp (android-15.0.0_r1). The overflow check aborts
+ * like bionic's __fortify_chk_fail. */
+size_t bionic___strlcpy_chk(char *dest, const char *src, size_t size, size_t dest_len)
+{
+	if (__builtin_expect(size > dest_len, 0)) {
+		fprintf(stderr, "strlcpy: prevented write past end of buffer\n");
+		abort();
+	}
+	return strlcpy(dest, src, size);
+}
+
+size_t bionic___strlcat_chk(char *dest, const char *src, size_t size, size_t dest_len)
+{
+	if (__builtin_expect(size > dest_len, 0)) {
+		fprintf(stderr, "strlcat: prevented write past end of buffer\n");
+		abort();
+	}
+	return strlcat(dest, src, size);
+}
+
 char * bionic___stpncpy_chk(char* __restrict dest, const char* __restrict src, size_t len, size_t dest_len) {
 	if (__builtin_expect(len > dest_len, 0)) {
 		fprintf(stderr, "stpncpy: prevented write past end of buffer");
