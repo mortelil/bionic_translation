@@ -24,3 +24,5 @@ cc "$repo/tests/mobile/test-libc-entrypoints.c" -L "$prefix/lib" -lc_bio -o "$ou
 timeout 30 "$out/test-libc-entrypoints"
 cc "$repo/tests/mobile/test-environment.c" -L "$prefix/lib" -lc_bio -o "$out/test-environment"
 timeout 30 "$out/test-environment"
+cc "$repo/tests/mobile/test-file-open.c" -L "$prefix/lib" -lc_bio -o "$out/test-file-open"
+timeout 30 "$out/test-file-open"
