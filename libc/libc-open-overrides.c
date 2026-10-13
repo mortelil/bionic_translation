@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -7,7 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define OPEN_NEEDS_MODE(flags) ((flags & O_CREAT) || (flags & O_TMPFILE))
+#define OPEN_NEEDS_MODE(flags) (((flags) & O_CREAT) || (((flags) & O_TMPFILE) == O_TMPFILE))
 
 /* nop */
 static bool apply_path_overrides(char **path) {
@@ -75,6 +76,59 @@ int bionic_open(char *path, int oflag, ...)
 
 	if(free_path)
 		free(path);
+
+	return fd;
+}
+
+/* bionic's openat() family. Android native libraries reference openat() and
+ * openat64() (Firefox's libcrashhelper.so/libcrashtools.so call openat64 for
+ * every crash-file operation), and they go through the same path overrides as
+ * open(): an app that hardcodes an Android path has to be redirected no matter
+ * which variant it used. */
+static int openat_common(int dirfd, const char *pathname, int oflag, va_list arg)
+{
+	int fd;
+	int mode;
+	char *path = (char *)pathname;
+
+	bool free_path = (*apply_path_overrides_func)(&path);
+
+	if (OPEN_NEEDS_MODE(oflag)) {
+		mode = va_arg(arg, int);
+		fd = openat(dirfd, path, oflag, mode);
+	} else {
+		fd = openat(dirfd, path, oflag);
+	}
+
+	int saved_errno = errno;
+	if (free_path)
+		free(path);
+	errno = saved_errno;
+
+	return fd;
+}
+
+int bionic_openat(int dirfd, const char *pathname, int oflag, ...)
+{
+	va_list arg;
+	int fd;
+
+	va_start(arg, oflag);
+	fd = openat_common(dirfd, pathname, oflag, arg);
+	va_end(arg);
+
+	return fd;
+}
+
+int bionic_openat64(int dirfd, const char *pathname, int oflag, ...)
+{
+	/* off_t is 64-bit on the LP64 targets ATL builds for, bionic's openat64 is openat. */
+	va_list arg;
+	int fd;
+
+	va_start(arg, oflag);
+	fd = openat_common(dirfd, pathname, oflag, arg);
+	va_end(arg);
 
 	return fd;
 }

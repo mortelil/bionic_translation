@@ -133,10 +133,16 @@ ssize_t bionic___readlink_chk(const char *path, char *buf, size_t count, size_t 
 	return readlink(path, buf, count);
 }
 
+int bionic_open(char *path, int flags, ...);
+int bionic_openat(int dirfd, const char *path, int flags, ...);
+
 int bionic___open_2(const char *pathname, int flags)
 {
-	flags |= O_LARGEFILE;
-	return open(pathname, flags, 0);
+	if ((flags & O_CREAT) || (flags & O_TMPFILE) == O_TMPFILE) {
+		fprintf(stderr, "__open_2: flags require a mode argument\n");
+		abort();
+	}
+	return bionic_open((char *)pathname, flags | O_LARGEFILE);
 }
 
 int bionic___openat_2(int dirfd, const char *pathname, int flags)
@@ -145,7 +151,7 @@ int bionic___openat_2(int dirfd, const char *pathname, int flags)
 		fprintf(stderr, "__openat_2: flags require a mode argument\n");
 		abort();
 	}
-	return openat(dirfd, pathname, flags | O_LARGEFILE);
+	return bionic_openat(dirfd, pathname, flags | O_LARGEFILE);
 }
 
 void *bionic___memset_chk(void *dest, int c, size_t n, size_t dest_len)

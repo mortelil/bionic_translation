@@ -164,7 +164,7 @@ int bionic_posix_fallocate64(int fd, off_t offset, off_t length)
 	return posix_fallocate(fd, offset, length);
 }
 
-#define OPEN_NEEDS_MODE(flags) ((flags & O_CREAT) || (flags & O_TMPFILE))
+#define OPEN_NEEDS_MODE(flags) (((flags) & O_CREAT) || (((flags) & O_TMPFILE) == O_TMPFILE))
 int bionic_open(char *path, int oflag, ...);
 int bionic_open64(char *filename, int flags, ...)
 {
