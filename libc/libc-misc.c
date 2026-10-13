@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <locale.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -86,19 +87,75 @@ char *bionic_setlocale(int category, const char *locale)
 	}
 }
 
-char *bionic_getenv(const char *name) {
-	if(!name) {
-		printf("!!! NULL passed to %s\n", __func__);
-	}
+/* Launch defaults filter HOME and supply ANDROID_ROOT until the app changes
+ * them. No app-name checks, fixed-length name table, or inferred sandboxing:
+ * ordinary variables still share the host process environment. */
+static pthread_mutex_t app_env_lock = PTHREAD_MUTEX_INITIALIZER;
+static int home_state, root_state; /* 0: launch default, 1: app-set, -1: removed */
 
-	if(!strcmp(name, "HOME"))
-		return NULL;
+static int *filtered_env_state(const char *name)
+{
+	if (!strcmp(name, "HOME")) return &home_state;
+	if (!strcmp(name, "ANDROID_ROOT")) return &root_state;
+	return NULL;
+}
 
-	/* no point returning anything else, apps mix this with using hardcoded paths */
-	if(!strcmp(name, "ANDROID_ROOT"))
-		return "/system";
-
+static char *app_getenv_locked(const char *name)
+{
+	int *state = filtered_env_state(name);
+	if (state && *state != 1)
+		return state == &root_state && *state == 0 ? "/system" : NULL;
 	return getenv(name);
+}
+
+char *bionic_getenv(const char *name)
+{
+	if (!name) return NULL;
+	pthread_mutex_lock(&app_env_lock);
+	char *value = app_getenv_locked(name);
+	pthread_mutex_unlock(&app_env_lock);
+	return value;
+}
+
+int bionic_setenv(const char *name, const char *value, int overwrite)
+{
+	if (!name || !*name || strchr(name, '=') || !value) { errno = EINVAL; return -1; }
+	pthread_mutex_lock(&app_env_lock);
+	int ret = 0;
+	if (overwrite || !app_getenv_locked(name)) {
+		ret = setenv(name, value, 1);
+		int *state = filtered_env_state(name);
+		if (ret == 0 && state) *state = 1;
+	}
+	pthread_mutex_unlock(&app_env_lock);
+	return ret;
+}
+
+int bionic_unsetenv(const char *name)
+{
+	if (!name || !*name || strchr(name, '=')) { errno = EINVAL; return -1; }
+	pthread_mutex_lock(&app_env_lock);
+	int ret = unsetenv(name);
+	int *state = filtered_env_state(name);
+	if (ret == 0 && state) *state = -1;
+	pthread_mutex_unlock(&app_env_lock);
+	return ret;
+}
+
+int bionic_putenv(char *entry)
+{
+	if (!entry || !*entry || *entry == '=') { errno = EINVAL; return -1; }
+	char *equals = strchr(entry, '=');
+	if (!equals) return bionic_unsetenv(entry);
+	pthread_mutex_lock(&app_env_lock);
+	int ret = putenv(entry); /* Preserve putenv's borrowed-buffer semantics. */
+	if (ret == 0) {
+		size_t length = (size_t)(equals - entry);
+		if (length == 4 && !memcmp(entry, "HOME", 4)) home_state = 1;
+		if (length == 12 && !memcmp(entry, "ANDROID_ROOT", 12)) root_state = 1;
+	}
+	pthread_mutex_unlock(&app_env_lock);
+	return ret;
 }
 
 /* __gnu_strerror_r emulates glibc's strerror_r.
