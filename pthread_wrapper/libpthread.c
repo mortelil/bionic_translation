@@ -309,6 +309,28 @@ int bionic_pthread_rwlock_wrlock(bionic_rwlock_t *rwlock)
 
 /* attr */
 
+/* AOSP bionic android-15.0.0_r1, libc/bionic/pthread_internal.h:
+ * PTHREAD_STACK_SIZE_DEFAULT excludes the alternate signal-stack reservation.
+ * Set the default at attribute initialization, not as a minimum at creation:
+ * applications may explicitly supply smaller stacks (including their own memory).
+ */
+#ifdef __LP64__
+#define BIONIC_PTHREAD_DEFAULT_STACK_SIZE ((1024 - 32) * 1024)
+#else
+#define BIONIC_PTHREAD_DEFAULT_STACK_SIZE ((1024 - 16) * 1024)
+#endif
+
+static int default_attr_init(pthread_attr_t *attr)
+{
+	int ret = pthread_attr_init(attr);
+	if (ret != 0)
+		return ret;
+	ret = pthread_attr_setstacksize(attr, BIONIC_PTHREAD_DEFAULT_STACK_SIZE);
+	if (ret != 0)
+		pthread_attr_destroy(attr);
+	return ret;
+}
+
 int bionic_pthread_attr_destroy(bionic_attr_t *attr)
 {
 	assert(attr);
@@ -327,7 +349,16 @@ int bionic_pthread_attr_init(bionic_attr_t *attr)
 	// Calling `pthread_attr_init` on a thread attributes object that has already been initialized results in ud.
 	*attr = (bionic_attr_t){0};
 	attr->glibc = mmap(NULL, sizeof(*attr->glibc), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-	return pthread_attr_init(attr->glibc);
+	if (attr->glibc == MAP_FAILED) {
+		*attr = (bionic_attr_t){0};
+		return ENOMEM;
+	}
+	int ret = default_attr_init(attr->glibc);
+	if (ret != 0) {
+		munmap(attr->glibc, sizeof(*attr->glibc));
+		*attr = (bionic_attr_t){0};
+	}
+	return ret;
 }
 
 int bionic_pthread_getattr_np(bionic_pthread_t thread, bionic_attr_t *attr)
@@ -338,10 +369,16 @@ int bionic_pthread_getattr_np(bionic_pthread_t thread, bionic_attr_t *attr)
 	return pthread_getattr_np((pthread_t)thread, attr->glibc);
 }
 
-int bionic_pthread_attr_settstack(bionic_attr_t *attr, void *stackaddr, size_t stacksize)
+int bionic_pthread_attr_setstack(bionic_attr_t *attr, void *stackaddr, size_t stacksize)
 {
 	assert(attr && IS_MAPPED(attr));
 	return pthread_attr_setstack(attr->glibc, stackaddr, stacksize);
+}
+
+/* Preserve the historical misspelled exported symbol. */
+int bionic_pthread_attr_settstack(bionic_attr_t *attr, void *stackaddr, size_t stacksize)
+{
+	return bionic_pthread_attr_setstack(attr, stackaddr, stacksize);
 }
 
 int bionic_pthread_attr_getstack(const bionic_attr_t *attr, void *stackaddr, size_t *stacksize)
@@ -426,7 +463,15 @@ pid_t bionic_pthread_gettid_np(bionic_pthread_t thread)
 int bionic_pthread_create(bionic_pthread_t *thread, const bionic_attr_t *attr, void* (*start)(void*), void *arg)
 {
 	assert(thread && (!attr || IS_MAPPED(attr)));
-	return pthread_create((pthread_t*)thread, (attr ? attr->glibc : NULL), start, arg);
+	if (attr)
+		return pthread_create((pthread_t*)thread, attr->glibc, start, arg);
+	pthread_attr_t defaults;
+	int ret = default_attr_init(&defaults);
+	if (ret != 0)
+		return ret;
+	ret = pthread_create((pthread_t*)thread, &defaults, start, arg);
+	pthread_attr_destroy(&defaults);
+	return ret;
 }
 
 /* ---------------------------------------------------------------------------------------------- *
