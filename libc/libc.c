@@ -9,6 +9,7 @@
 #include <setjmp.h>
 #include <signal.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -243,13 +244,27 @@ glibc_dirent_to_bionic_dirent(const struct dirent *de, struct bionic_dirent *bde
 struct bionic_dirent *
 bionic_readdir(DIR *dirp)
 {
-	assert(dirp);
-	static struct bionic_dirent bde;
-	struct dirent *de;
-	if (!(de = readdir(dirp)))
-		return NULL;
-	glibc_dirent_to_bionic_dirent(de, &bde);
-	return &bde;
+#ifdef __GLIBC__
+#define host_dirent64 dirent64
+#define host_readdir64 readdir64
+#else
+// musl uses 64-bit inode/offset fields even on 32-bit hosts.
+#define host_dirent64 dirent
+#define host_readdir64 readdir
+#endif
+    /* Bionic's dirent has Linux's 64-bit dirent layout on both ABIs.
+     * libc owns the result per DIR, valid until the next read on that stream.
+     * A shared conversion buffer breaks nested and concurrent enumerators. */
+    _Static_assert(offsetof(struct bionic_dirent, d_ino) == offsetof(struct host_dirent64, d_ino), "dirent inode ABI");
+    _Static_assert(offsetof(struct bionic_dirent, d_off) == offsetof(struct host_dirent64, d_off), "dirent offset ABI");
+    _Static_assert(offsetof(struct bionic_dirent, d_reclen) == offsetof(struct host_dirent64, d_reclen), "dirent reclen ABI");
+    _Static_assert(offsetof(struct bionic_dirent, d_type) == offsetof(struct host_dirent64, d_type), "dirent type ABI");
+    _Static_assert(offsetof(struct bionic_dirent, d_name) == offsetof(struct host_dirent64, d_name), "dirent name ABI");
+    _Static_assert(sizeof(((struct bionic_dirent *)0)->d_ino) == sizeof(((struct host_dirent64 *)0)->d_ino), "dirent inode width");
+    _Static_assert(sizeof(((struct bionic_dirent *)0)->d_off) == sizeof(((struct host_dirent64 *)0)->d_off), "dirent offset width");
+    return (struct bionic_dirent *)host_readdir64(dirp);
+#undef host_dirent64
+#undef host_readdir64
 }
 
 // readdir_r is deprecated in glibc, but as long as it exists, it makes sense to use it for implementing the bionic variant
